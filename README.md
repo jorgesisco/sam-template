@@ -119,6 +119,6 @@ Also DO NOT enclose the data in the `body` key.
 Example:
 ```json
 {
-    "data": **{data}
+    "data": "**{data}"
 }
 ```
