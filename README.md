@@ -32,7 +32,7 @@ The INFO.md file in each lambda directory contains instructions on how to test t
 
 ### ** Invoke Locally with Docker **
 
-Assuming Docker is buit already, run the following command to run container locally:
+Assuming Docker is built already, run the following command to run container locally:
 
 ```bash
 make run
