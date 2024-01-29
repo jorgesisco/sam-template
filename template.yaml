@@ -1,0 +1,266 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: project desc
+
+Parameters:
+  VpcCidrBlock:
+    Type: String
+    Default: 10.0.0.0/16
+  PublicSubnetCidrBlock:
+    Type: String
+    Default: 10.0.1.0/24
+  PrivateSubnetCidrBlock:
+    Type: String
+    Default: 10.0.2.0/24
+  LogLevel:
+    Type: String
+    Description: Log level of the lambda function
+    Default: INFO
+    AllowedValues:
+      - DEBUG
+      - INFO
+      - WARNING
+      - ERROR
+      - CRITICAL
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - prod
+  ProjectName:
+    Type: String
+    Default: PROJECT-NAME
+
+Globals:
+  Function:
+    CodeUri: src/
+    MemorySize: 512
+    Environment:
+      Variables:
+        STACK_NAME: !Ref AWS::StackName
+        LOG_LEVEL: !Ref LogLevel
+
+Resources:
+
+  StaticIpVpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidrBlock
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      InstanceTenancy: default
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref StaticIpVpc
+      CidrBlock: !Ref PublicSubnetCidrBlock
+      MapPublicIpOnLaunch: false
+      AvailabilityZone: !Select
+        - 0
+        - Fn::GetAZs: !Ref 'AWS::Region'
+
+  PrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref StaticIpVpc
+      CidrBlock: !Ref PrivateSubnetCidrBlock
+      MapPublicIpOnLaunch: false
+      AvailabilityZone: !Select
+        - 0
+        - Fn::GetAZs: !Ref 'AWS::Region'
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+
+  VpcAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref StaticIpVpc
+
+  VpcPublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref StaticIpVpc
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VpcAttachment
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      RouteTableId: !Ref VpcPublicRouteTable
+      GatewayId: !Ref InternetGateway
+
+  SubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref VpcPublicRouteTable
+      SubnetId: !Ref PublicSubnet
+
+  ElasticIp:
+    Type: AWS::EC2::EIP
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt ElasticIp.AllocationId
+      SubnetId: !Ref PublicSubnet
+
+  VpcPrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref StaticIpVpc
+
+  PrivateRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VpcAttachment
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      RouteTableId: !Ref VpcPrivateRouteTable
+      NatGatewayId: !Ref NatGateway
+
+  PrivateSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref VpcPrivateRouteTable
+      SubnetId: !Ref PrivateSubnet
+
+  Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${ProjectName}-bucket-${Environment}'
+
+  ProjectQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${ProjectName}-${Environment}.fifo'
+      VisibilityTimeout: 900
+      FifoQueue: true
+      MaximumMessageSize: 1024
+
+  MyApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: !Ref Environment
+      Auth:
+        ApiKeyRequired: true
+
+  MyApiKey:
+    Type: AWS::ApiGateway::ApiKey
+    Properties:
+      Enabled: true
+      Name: !Sub '${ProjectName}-${Environment}-api-key'
+
+  MyUsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    DependsOn:
+      - MyApiStage
+    Properties:
+      UsagePlanName: !Sub '${ProjectName}-${Environment}-usage-plan'
+      ApiStages:
+        - ApiId: !Ref MyApi
+          Stage: !Ref Environment
+      Quota:
+        Limit: 2000
+        Period: MONTH
+      Throttle:
+        BurstLimit: 100
+        RateLimit: 50
+
+  MyUsagePlanKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    DependsOn:
+      - MyUsagePlan
+    Properties:
+      KeyId: !Ref MyApiKey
+      KeyType: "API_KEY"
+      UsagePlanId: !Ref MyUsagePlan
+
+  ProcessLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      Timeout: 900
+      FunctionName: !Sub '${ProjectName}-process-${Environment}'
+      PackageType: Image
+      ImageUri: <aws_account_id>.dkr.ecr.eu-central-1.amazonaws.com/lambda-image:v0.0.1
+      MemorySize: 512
+      VpcConfig:
+        SecurityGroupIds:
+          - !GetAtt StaticIpVpc.DefaultSecurityGroup
+        SubnetIds:
+          - !Ref PrivateSubnet
+      Events:
+        EmailEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt ProjectQueue.Arn
+            BatchSize: 1
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /
+            Method: post
+            RestApiId:
+              Ref: MyApi
+
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref Bucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ProcessedData
+        - SQSPollerPolicy:
+            QueueName: !Ref ProjectQueue # Allows the Lambda to poll from EmailQueue.
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: "Allow"
+              Action:
+                - "ssm:GetParameter"
+              Resource:
+                - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lambda/${AWS::StackName}/*"
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: "Allow"
+              Action:
+                - "logs:CreateLogGroup"
+                - "logs:CreateLogStream"
+                - "logs:PutLogEvents"
+              Resource: "arn:aws:logs:*:*:*"
+#        - Version: "2012-10-17"
+#          Statement:
+#            - Effect: "Allow"
+#              Action:
+#                - "sqs:SendMessage"
+#              Resource: !GetAtt NextQueue.Arn
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          POWERTOOLS_LOGGER_SAMPLE_RATE: 0.1
+          POWERTOOLS_LOGGER_LOG_EVENT: true
+          POWERTOOLS_SERVICE_NAME: !Sub "${AWS::StackName}-hooks"
+          POWERTOOLS_METRICS_NAMESPACE: !Sub "${AWS::StackName}-hooks"
+
+  ProcessedData:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      TableName: !Sub '${ProjectName}-${Environment}-email-processed-records'
+      AttributeDefinitions:
+        - AttributeName: "project"   # Sort Key
+          AttributeType: "S"         # Assuming 'project' is a string
+        - AttributeName: "id"
+          AttributeType: "S"
+      KeySchema:
+        - AttributeName: "project"   # Sort Key
+          KeyType: "HASH"
+        - AttributeName: "id"
+          KeyType: "RANGE"
+
+Outputs:
+  StaticIpAddress:
+    Description: Address of the generated static ip
+    Value: !Ref ElasticIp
+  TestEndpoint:
+    Description: Url of test endpoint to verify Static IP
+    Value: !Join ['', ['https://', !Ref MyApi, '.execute-api.', !Ref AWS::Region, '.amazonaws.com/dev']]

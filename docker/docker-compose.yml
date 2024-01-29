@@ -1,0 +1,16 @@
+version: "3.11"
+
+services:
+  lambda:
+    build:
+      context: ../
+      dockerfile: docker/Dockerfile
+    image: lambda-image:latest
+    env_file:
+      - ../.env
+    ports:
+      - "9000:8080"
+    volumes:
+      - ../:/var/task
+    environment:
+      - PYTHONPATH=/var/task

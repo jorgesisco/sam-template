@@ -1,0 +1,6 @@
+aws-lambda-powertools
+awslambdaric
+boto3
+botocore
+load-dotenv
+pydantic
