@@ -1,4 +1,7 @@
 import json
+from pathlib import Path
+import sys
+sys.path.append(str(Path(__file__).resolve().parent.parent))
 from src import logger, session
 
 

@@ -1,8 +1,11 @@
 import json
 from aws_lambda_powertools.utilities.typing import LambdaContext
+
+from pathlib import Path
+import sys
+sys.path.append(str(Path(__file__).resolve().parent.parent))
 from src import logger
 from src.process_manager import process_event
-
 
 def handler(event, context: LambdaContext) -> dict:
     """Lambda handler for processing events."""

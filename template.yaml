@@ -5,13 +5,12 @@ Description: project desc
 Parameters:
   VpcCidrBlock:
     Type: String
-    Default: 10.0.0.0/16
   PublicSubnetCidrBlock:
     Type: String
-    Default: 10.0.1.0/24
   PrivateSubnetCidrBlock:
     Type: String
-    Default: 10.0.2.0/24
+  RoutesDestinationCidrBlock:
+    Type: String
   LogLevel:
     Type: String
     Description: Log level of the lambda function
@@ -30,7 +29,9 @@ Parameters:
       - prod
   ProjectName:
     Type: String
-    Default: PROJECT-NAME
+  ProcessLambdaImageUri:
+    Type: String
+
 
 Globals:
   Function:
@@ -89,7 +90,7 @@ Resources:
     Type: AWS::EC2::Route
     DependsOn: VpcAttachment
     Properties:
-      DestinationCidrBlock: 0.0.0.0/0
+      DestinationCidrBlock: !Ref RoutesDestinationCidrBlock
       RouteTableId: !Ref VpcPublicRouteTable
       GatewayId: !Ref InternetGateway
 
@@ -117,7 +118,7 @@ Resources:
     Type: AWS::EC2::Route
     DependsOn: VpcAttachment
     Properties:
-      DestinationCidrBlock: 0.0.0.0/0
+      DestinationCidrBlock: !Ref RoutesDestinationCidrBlock
       RouteTableId: !Ref VpcPrivateRouteTable
       NatGatewayId: !Ref NatGateway
 
@@ -130,9 +131,9 @@ Resources:
   Bucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub '${ProjectName}-bucket-${Environment}'
+      BucketName: !Sub '${ProjectName}-${Environment}'
 
-  ProjectQueue:
+  LambdaQueue:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: !Sub '${ProjectName}-${Environment}.fifo'
@@ -151,14 +152,14 @@ Resources:
     Type: AWS::ApiGateway::ApiKey
     Properties:
       Enabled: true
-      Name: !Sub '${ProjectName}-${Environment}-api-key'
+      Name: !Sub '${ProjectName}-api-key-${Environment}'
 
   MyUsagePlan:
     Type: AWS::ApiGateway::UsagePlan
     DependsOn:
       - MyApiStage
     Properties:
-      UsagePlanName: !Sub '${ProjectName}-${Environment}-usage-plan'
+      UsagePlanName: !Sub '${ProjectName}-usage-plan-${Environment}'
       ApiStages:
         - ApiId: !Ref MyApi
           Stage: !Ref Environment
@@ -167,7 +168,7 @@ Resources:
         Period: MONTH
       Throttle:
         BurstLimit: 100
-        RateLimit: 50
+        RateLimit: 20
 
   MyUsagePlanKey:
     Type: AWS::ApiGateway::UsagePlanKey
@@ -184,7 +185,7 @@ Resources:
       Timeout: 900
       FunctionName: !Sub '${ProjectName}-process-${Environment}'
       PackageType: Image
-      ImageUri: <aws_account_id>.dkr.ecr.eu-central-1.amazonaws.com/lambda-image:v0.0.1
+      ImageUri: !Ref LambdaImageUri
       MemorySize: 512
       VpcConfig:
         SecurityGroupIds:
@@ -195,7 +196,7 @@ Resources:
         EmailEvent:
           Type: SQS
           Properties:
-            Queue: !GetAtt ProjectQueue.Arn
+            Queue: !GetAtt LambdaQueue.Arn
             BatchSize: 1
         ApiEvent:
           Type: Api
@@ -211,7 +212,7 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref ProcessedData
         - SQSPollerPolicy:
-            QueueName: !Ref ProjectQueue # Allows the Lambda to poll from EmailQueue.
+            QueueName: !Ref LambdaQueue # Allows the Lambda to poll from EmailQueue.
         - Version: "2012-10-17"
           Statement:
             - Effect: "Allow"
@@ -232,7 +233,7 @@ Resources:
 #            - Effect: "Allow"
 #              Action:
 #                - "sqs:SendMessage"
-#              Resource: !GetAtt NextQueue.Arn
+#              Resource: !GetAtt LambdaQueue.Arn # Allows the Lambda to send messages to designated queue.
       Environment:
         Variables:
           LOG_LEVEL: !Ref LogLevel

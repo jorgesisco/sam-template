@@ -1,0 +1,25 @@
+version = 0.1
+
+# Default configuration (can be used for development or sandbox environments)
+[default]
+[default.deploy]
+[default.deploy.parameters]
+parameter_overrides = "PARAMS_OVERIDE_dev"
+stack_name = "STACK-NAME-dev"
+s3_bucket = "samclisourcebucket-dev"
+s3_prefix = "prefix-dev"
+region = "region"
+capabilities = "CAPABILITY_IAM"
+image_repositories = ["IMAGE_REPOS_LIST_dev"]
+
+# Production configuration
+[production]
+[production.deploy]
+[production.deploy.parameters]
+parameter_overrides = "PARAMS_OVERIDE_prod"
+stack_name = "STACK-NAME-prod"
+s3_bucket = "samclisourcebucket-prod"
+s3_prefix = "prefix-prod"
+region = "region"
+capabilities = "CAPABILITY_IAM"
+image_repositories = ["IMAGE_REPOS_LIST_prod"]
