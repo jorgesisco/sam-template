@@ -32,3 +32,9 @@ prune:
 
 push:
 	docker/ecr.sh
+
+deploy: ##=> Deploy to AWS Lambda
+	./sam.sh dev
+
+deploy_prod:
+	./sam.sh prod
