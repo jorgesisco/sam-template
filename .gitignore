@@ -1,2 +1,5 @@
 .env
 .idea
+.env.dev
+.env.prod
+samconfig.toml
